@@ -2219,7 +2219,6 @@ function buddyVoiceReply(reply){
   vs.bargeHist = vs.bargeGoodHist && vs.bargeGoodHist.length >= 15 ? vs.bargeGoodHist.slice() : [];
   vs.bargeFalse = 0;
   vs.bargeSelf = 0;
-  if (BUDDY_IQ_ANSWERS) vs.bargeUnclear = null;
   vs.bargeOff = false;
   /* What IQ is saying now, so a check that only hears IQ's own voice (speaker leak) can be recognised. */
   vs.speakText = buddySpeakableText(reply);
@@ -2351,7 +2350,7 @@ function buddyBargeIntent(text, speakText, answerText){
      stop words ("is it", "what now" alone are fragments, not a new request). */
   /* "I ... would rather": a pause transcribed as dots must not hide the words around it. */
   var flat = rest.replace(/\s*\u2026\s*/g, ' ');
-  if (hadCue) return words >= 3 && (/[?\u061f]/.test(flat) || buddyBargeRequestRe.test(flat) || buddyBargeStatement(flat)) ? { act: 'send', text: rest } : { act: 'stop' };
+  if (hadCue) return words >= 3 && (/[?\u061f]/.test(flat) || buddyBargeRequestRe.test(flat) || buddyBargeStatement(flat) || (BUDDY_IQ_ANSWERS && words >= 4)) ? { act: 'send', text: rest } : { act: 'stop' };
   /* No stop word first: only a clear question or request to IQ is sent. Side
      conversations, radio and IQ's own instructions ("Check stock at...") are not. */
   if (words >= 3 && buddyBargeQuestionRe.test(flat)) return { act: 'send', text: rest };
@@ -2364,11 +2363,13 @@ function buddyBargeIntent(text, speakText, answerText){
      otherwise be unclear. Existing noise, echo, stop, continue, goodbye, and question routes
      return earlier; the existing runaway guard still applies downstream. */
   if (BUDDY_IQ_ANSWERS && words >= 3 && /(?:^|[.!?]\s*)(?:(?:so|okay|ok|now|please|and|just)[\s,]+)*(?:(?:explain|summari[sz]e|simplify|shorten|elaborate\s+on)\b|make\s+(?:it|that|this)(?:\s+(?:answer|explanation|bit|one))?\s+(?:a\s+bit\s+|much\s+)?(?:shorter|longer|simpler|briefer|clearer|quicker)\b)/i.test(flat)) return { act: 'send', text: rest };
-  if (BUDDY_IQ_ANSWERS && words >= 10 && buddyBargeFirstPersonRe.test(flat) && !/\b(?:good\s*-?\s*bye|bye|take\s+care|see\s+you|adios)\b/i.test(flat)) return { act: 'send', text: rest };
+  /* Trial only: a complete cut-in is speech to IQ even when phrased as a plain
+     statement. The recorder and transcription have already confirmed speech;
+     the checks above still handle noise, echo, farewell and control phrases. */
+  if (BUDDY_IQ_ANSWERS && words >= 4) return { act: 'send', text: rest };
   return { act: 'resume', why: 'unclear' };
 }
 var BUDDY_IQ_ANSWERS = (function(){ try { return new URLSearchParams(location.search).get('iqanswers') === '1'; } catch (e) { return false; } })();
-var buddyBargeFirstPersonRe = /(?:^|[^\p{L}'])(?:i|i'm|i've|i'd|i'll|we|we're|we've|we'd|my|our|me|us)(?![\p{L}'])/iu;
 /* A first-person statement of what the rep wants or is thinking about ("I'd rather...", "I was
    thinking of...", "it crossed my mind..."). Plain "I think", "I need", "I forgot" and "I mean" are left
    out: they open everyday side conversations ("I need to pick up the kids", "I forgot my keys"). */
@@ -2424,19 +2425,6 @@ function buddyBargeRunShare(text, other){
   for (var i = 0; i + 2 < o.length; i++) runs[o[i] + ' ' + o[i + 1] + ' ' + o[i + 2]] = 1;
   for (var j = 0; j + 2 < h.length; j++) { total++; if (runs[h[j] + ' ' + h[j + 1] + ' ' + h[j + 2]]) hit++; }
   return total ? hit / total : 0;
-}
-function buddyBargeRepeatMatch(first, second){
-  var thin = /^(?:the|this|that|and|but|for|with|from|into|our|your|its|are|was|were|have|has|had|not|you|she|him|her|they|them|can|will|would|should|could|please)$/;
-  function keys(text){ return buddyBargeWords(text).filter(function(w){ return w.length >= 3 && !thin.test(w); }); }
-  var a = keys(first), b = keys(second);
-  if (a.length < 3 || b.length < 3) return false;
-  var found = 0, used = {};
-  for (var i = 0; i < a.length; i++) {
-    for (var j = 0; j < b.length; j++) {
-      if (!used[j] && a[i] === b[j]) { used[j] = true; found++; break; }
-    }
-  }
-  return found >= 3 && found / Math.min(a.length, b.length) >= 0.6;
 }
 function buddyBargeLoopRisk(vs, text){
   /* Returns why a question is held back ('' when it is not), so diagnostics can show it. */
@@ -2801,22 +2789,13 @@ function buddyBargeCheck(vs, b, blob){
       var said = typeof data.text === 'string' ? data.text.trim() : '';
       var echoText = typeof b.echoText === 'string' ? b.echoText : vs.speakText;
       var intent = buddyBargeIntent(said, echoText, vs.speakText);
-      /* Trial only: keep a few recent unclear phrases so a short or garbled retry
-         cannot erase an earlier clear one. Every matching clip is transcribed separately. */
-      if (BUDDY_IQ_ANSWERS && intent.act === 'resume' && intent.why === 'unclear' && buddyBargeWords(said).length >= 3) {
-        var now = Date.now();
-        var previous = (vs.bargeUnclear || []).filter(function(x){ return now - x.at <= 20000; });
-        var repeated = previous.some(function(x){ return buddyBargeRepeatMatch(x.text, said); });
-        vs.bargeUnclear = repeated ? [] : previous.concat([{ text: said, at: now }]).slice(-3);
-        if (repeated) intent = { act: 'send', text: said };
-      } else if (BUDDY_IQ_ANSWERS) vs.bargeUnclear = [];
       /* Runaway guard: a question sent by an interruption is held back (IQ stops and
          asks for it again) only when it looks like IQ's own words - three-word runs
          from IQ's last three answers - or, without system echo cancellation ('all'),
          repeats a question already sent this way or 4 have been sent in the last 3 minutes. A loop of IQ hearing itself
          therefore stays bounded, while a rep can change course again and again. */
       var guarded = intent.act === 'send' && buddyBargeLoopRisk(vs, intent.text);
-      buddyBargeLog('CHECK w' + b.diag + ' transcript "' + said.slice(0, 160) + '" -> ' + intent.act + (intent.why ? ' (' + intent.why + ')' : '') + (intent.text ? ' text "' + intent.text.slice(0, 80) + '"' : '') + (guarded ? ' -> HELD BY GUARD: ' + guarded : ''));
+      buddyBargeLog('CHECK w' + b.diag + ' transcript "' + said.slice(0, 160) + '" -> ' + intent.act + (intent.why ? ' (' + intent.why + ')' : '') + (intent.text ? ' text "' + intent.text.slice(0, 80) + '"' : '') + (guarded ? ' -> HELD BY GUARD: ' + guarded : '') + (BUDDY_IQ_ANSWERS && b.triggerBar ? ', voice peak/bar ' + (b.peak || 0).toFixed(3) + '/' + b.triggerBar.toFixed(3) : ''));
       /* Where the time went, so slow cut-ins can be attributed: noticing the voice, waiting for the rep to finish, or transcribing. */
       if (b.tLoud && b.tTrig && b.tEnd) buddyBargeLog('CUT-IN TIMING w' + b.diag + ': voice heard -> IQ silenced ' + (b.tTrig - b.tLoud) + ' ms, -> rep finished (clip end) ' + (b.tEnd - b.tTrig) + ' ms, -> transcript ' + (Date.now() - b.tEnd) + ' ms, total ' + (Date.now() - b.tLoud) + ' ms');
       if (guarded) intent = { act: 'stop' };
@@ -2987,7 +2966,7 @@ function buddyBargeWatch(vs){
       if (BUDDY_BARGE_DEBUG && vs.diagRing) buddyBargeLog('raw mic trace before trigger (ms ago:level:IQ-speaking) ' + vs.diagRing.map(function(x){ return (x[0] - Date.now()) + ':' + x[1] + ':' + x[2]; }).join(' '));
       buddyBargeLog('TRIGGER w' + b.diag + ': level ' + rms.toFixed(3) + ' > bar ' + thr.toFixed(3) + ' (floor ' + floor.toFixed(3) + ', IQ p95 ' + sorted[Math.floor(sorted.length * 0.95)].toFixed(3) + ', history ' + hist.length + (vs.bargeSelfLevel ? ', IQ self level ' + vs.bargeSelfLevel.toFixed(3) : '') + '), voice-band ' + Math.round(band * 100) + '%, voice frames ' + win.filter(Boolean).length + '/10, IQ audio for ' + (Date.now() - buddySpeakFirstAt) + ' ms' + (BUDDY_BARGE_MUTE ? ' [IQ MUTED]' : ''));
       vs.bargeTotal = (vs.bargeTotal || 0) + 1;
-      b.checking = true; b.floor = floor; speechAt = now; lastLoud = now; b.tTrig = now;
+      b.checking = true; b.floor = floor; if (BUDDY_IQ_ANSWERS) b.triggerBar = thr; speechAt = now; lastLoud = now; b.tTrig = now;
       buddyBargeHold(b);
       vs.phase = 'barge-check';
       buddyVoicePhase('I’m listening — go ahead…');
