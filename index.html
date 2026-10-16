@@ -2801,14 +2801,15 @@ function buddyBargeCheck(vs, b, blob){
       var said = typeof data.text === 'string' ? data.text.trim() : '';
       var echoText = typeof b.echoText === 'string' ? b.echoText : vs.speakText;
       var intent = buddyBargeIntent(said, echoText, vs.speakText);
-      /* Trial only: a second independently transcribed version of the same unclear statement
-         within this answer is deliberate, even when it has no question word or first person. */
-      if (BUDDY_IQ_ANSWERS && intent.act === 'resume' && intent.why === 'unclear' && buddyBargeWords(said).length >= 5) {
-        var previous = vs.bargeUnclear, now = Date.now();
-        var repeated = previous && now - previous.at <= 20000 && buddyBargeRepeatMatch(previous.text, said);
-        vs.bargeUnclear = repeated ? null : { text: said, at: now };
+      /* Trial only: keep a few recent unclear phrases so a short or garbled retry
+         cannot erase an earlier clear one. Every matching clip is transcribed separately. */
+      if (BUDDY_IQ_ANSWERS && intent.act === 'resume' && intent.why === 'unclear' && buddyBargeWords(said).length >= 3) {
+        var now = Date.now();
+        var previous = (vs.bargeUnclear || []).filter(function(x){ return now - x.at <= 20000; });
+        var repeated = previous.some(function(x){ return buddyBargeRepeatMatch(x.text, said); });
+        vs.bargeUnclear = repeated ? [] : previous.concat([{ text: said, at: now }]).slice(-3);
         if (repeated) intent = { act: 'send', text: said };
-      } else if (BUDDY_IQ_ANSWERS) vs.bargeUnclear = null;
+      } else if (BUDDY_IQ_ANSWERS) vs.bargeUnclear = [];
       /* Runaway guard: a question sent by an interruption is held back (IQ stops and
          asks for it again) only when it looks like IQ's own words - three-word runs
          from IQ's last three answers - or, without system echo cancellation ('all'),
