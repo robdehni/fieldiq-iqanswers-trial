@@ -2219,6 +2219,7 @@ function buddyVoiceReply(reply){
   vs.bargeHist = vs.bargeGoodHist && vs.bargeGoodHist.length >= 15 ? vs.bargeGoodHist.slice() : [];
   vs.bargeFalse = 0;
   vs.bargeSelf = 0;
+  if (BUDDY_IQ_ANSWERS) vs.bargeUnclear = null;
   vs.bargeOff = false;
   /* What IQ is saying now, so a check that only hears IQ's own voice (speaker leak) can be recognised. */
   vs.speakText = buddySpeakableText(reply);
@@ -2362,6 +2363,7 @@ function buddyBargeIntent(text, speakText, answerText){
   /* Test-only (?iqanswers=1, off by default): allow a full first-person statement that would
      otherwise be unclear. Existing noise, echo, stop, continue, goodbye, and question routes
      return earlier; the existing runaway guard still applies downstream. */
+  if (BUDDY_IQ_ANSWERS && words >= 3 && /(?:^|[.!?]\s*)(?:(?:so|okay|ok|now|please|and|just)[\s,]+)*(?:(?:explain|summari[sz]e|simplify|shorten|elaborate\s+on)\b|make\s+(?:it|that|this)(?:\s+(?:answer|explanation|bit|one))?\s+(?:a\s+bit\s+|much\s+)?(?:shorter|longer|simpler|briefer|clearer|quicker)\b)/i.test(flat)) return { act: 'send', text: rest };
   if (BUDDY_IQ_ANSWERS && words >= 10 && buddyBargeFirstPersonRe.test(flat) && !/\b(?:good\s*-?\s*bye|bye|take\s+care|see\s+you|adios)\b/i.test(flat)) return { act: 'send', text: rest };
   return { act: 'resume', why: 'unclear' };
 }
@@ -2422,6 +2424,19 @@ function buddyBargeRunShare(text, other){
   for (var i = 0; i + 2 < o.length; i++) runs[o[i] + ' ' + o[i + 1] + ' ' + o[i + 2]] = 1;
   for (var j = 0; j + 2 < h.length; j++) { total++; if (runs[h[j] + ' ' + h[j + 1] + ' ' + h[j + 2]]) hit++; }
   return total ? hit / total : 0;
+}
+function buddyBargeRepeatMatch(first, second){
+  var thin = /^(?:the|this|that|and|but|for|with|from|into|our|your|its|are|was|were|have|has|had|not|you|she|him|her|they|them|can|will|would|should|could|please)$/;
+  function keys(text){ return buddyBargeWords(text).filter(function(w){ return w.length >= 3 && !thin.test(w); }); }
+  var a = keys(first), b = keys(second);
+  if (a.length < 3 || b.length < 3) return false;
+  var found = 0, used = {};
+  for (var i = 0; i < a.length; i++) {
+    for (var j = 0; j < b.length; j++) {
+      if (!used[j] && a[i] === b[j]) { used[j] = true; found++; break; }
+    }
+  }
+  return found >= 3 && found / Math.min(a.length, b.length) >= 0.6;
 }
 function buddyBargeLoopRisk(vs, text){
   /* Returns why a question is held back ('' when it is not), so diagnostics can show it. */
@@ -2786,6 +2801,14 @@ function buddyBargeCheck(vs, b, blob){
       var said = typeof data.text === 'string' ? data.text.trim() : '';
       var echoText = typeof b.echoText === 'string' ? b.echoText : vs.speakText;
       var intent = buddyBargeIntent(said, echoText, vs.speakText);
+      /* Trial only: a second independently transcribed version of the same unclear statement
+         within this answer is deliberate, even when it has no question word or first person. */
+      if (BUDDY_IQ_ANSWERS && intent.act === 'resume' && intent.why === 'unclear' && buddyBargeWords(said).length >= 5) {
+        var previous = vs.bargeUnclear, now = Date.now();
+        var repeated = previous && now - previous.at <= 20000 && buddyBargeRepeatMatch(previous.text, said);
+        vs.bargeUnclear = repeated ? null : { text: said, at: now };
+        if (repeated) intent = { act: 'send', text: said };
+      } else if (BUDDY_IQ_ANSWERS) vs.bargeUnclear = null;
       /* Runaway guard: a question sent by an interruption is held back (IQ stops and
          asks for it again) only when it looks like IQ's own words - three-word runs
          from IQ's last three answers - or, without system echo cancellation ('all'),
@@ -4164,6 +4187,6 @@ document.addEventListener('visibilitychange',function(){
   }).catch(function(){});
 });
 </script>
-<!-- Trial preview: no service worker, so its cache cannot touch the live site. -->
+
 </body>
 </html>
