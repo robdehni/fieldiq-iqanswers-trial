@@ -4164,6 +4164,6 @@ document.addEventListener('visibilitychange',function(){
   }).catch(function(){});
 });
 </script>
-<script>if("serviceWorker"in navigator){navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"}).catch(function(){});}</script>
+<!-- Trial preview: no service worker, so its cache cannot touch the live site. -->
 </body>
 </html>
