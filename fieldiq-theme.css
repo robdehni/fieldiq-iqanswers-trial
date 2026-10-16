@@ -1,0 +1,17 @@
+/* FieldIQ pearl and plum. Shared by every app page. */
+:root{
+  --fiq-canvas:#f8f6f3;
+  --fiq-surface:#ffffff;
+  --fiq-primary:#756285;
+  --fiq-strong:#62536e;
+  --fiq-ink:#514b63;
+  --fiq-secondary:#6b6074;
+  --fiq-muted:#86788f;
+  --fiq-border:#e5dfe9;
+  --fiq-tint:#eee8f0;
+  --fiq-hover:#f1ecef;
+  --fiq-wash:#faf8fc;
+  --fiq-highlight:#7d6a8b;
+}
+body{-webkit-font-smoothing:antialiased}
+a{color:var(--fiq-primary)}
